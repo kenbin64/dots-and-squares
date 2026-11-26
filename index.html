@@ -50,7 +50,7 @@
   #intro.hide{display:none}
   #introcv{width:100%;height:100%;display:block}
 </style>
-</head>
+<link rel="icon" href="./game-media/dots-and-boxes/logo.svg" type="image/svg+xml"><link rel="stylesheet" href="./game-media/experience.css"></head>
 <body>
   <canvas id="cv"></canvas>
   <div class="overlay top">
@@ -62,7 +62,7 @@
     <button class="btn ghost" onclick="openLobby()">New game</button>
     <button class="btn ghost" onclick="resetView()">My side</button>
     <button class="btn ghost" onclick="showHelp()">? How to play</button>
-    <button class="btn ghost" id="muteBtn" onclick="toggleMute()">🔊 Music</button>
+    <button class="btn ghost" id="muteBtn" onclick="toggleMute()">🔊 Effects</button>
   </div>
   <div id="lobby"></div>
   <div id="intro" class="hide"><canvas id="introcv"></canvas></div>
@@ -338,7 +338,7 @@ function winMusic() {
       g.gain.setValueAtTime(0, t2); g.gain.linearRampToValueAtTime(0.12, t2 + 0.03); g.gain.exponentialRampToValueAtTime(0.001, t2 + 1.2); o.connect(g); g.connect(_actx.destination); o.start(t2); o.stop(t2 + 1.3); });
   } catch (_) {}
 }
-function toggleMute() { fxMuted = !fxMuted; try { localStorage.setItem('db_muted', fxMuted ? '1' : '0'); } catch (_) {} const b = document.getElementById('muteBtn'); if (b) b.textContent = fxMuted ? '🔇 Music' : '🔊 Music'; }
+function toggleMute() { fxMuted = !fxMuted; try { localStorage.setItem('db_muted', fxMuted ? '1' : '0'); } catch (_) {} const b = document.getElementById('muteBtn'); if (b) b.textContent = fxMuted ? '🔇 Effects' : '🔊 Effects'; }
 function playWinFanfare(winners, best, tie) {
   const overlay = document.getElementById('intro'), cv = document.getElementById('introcv'), ctx = cv.getContext('2d');
   overlay.classList.remove('hide'); overlay.style.opacity = 1;
@@ -713,5 +713,5 @@ function tick() {
 camera.position.set(0, 16, 16); controls.target.set(0, 0, 0); controls.update();
 resize(); openLobby(); tick(); friends.join();
 </script>
-</body>
+<script type="module" src="./game-media/experience.mjs" data-bfx-game="dots-and-boxes"></script></body>
 </html>
