@@ -76,6 +76,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { friendTable } from './friend-table.js';
 
 const COLORS = [0xCB3A33, 0x5AA63A, 0x8450A8, 0xE5B21C];      // painted-wood: red, green, purple, yellow
 const COLOR_NAMES = ['Red', 'Green', 'Purple', 'Yellow'];
@@ -161,7 +162,7 @@ let ghost = null, wallMat = [], tileMat = [], ghostMat = null, hoverEdge = null;
 let boardSize = 10, seats = [], carrying = false, handWall = null, candidate = null, camTween = null, botTimer = null, playing = false;
 const SIDES = [0, 2, 1, 3]; // play order -> board side (0 S, 2 N, 1 E, 3 W): 2 players sit opposite each other
 
-function startGame() {
+function startGame(online = false) {
   const active = seats.filter(s => s.active);
   if (active.length < 2) { alert('Need at least 2 players. Turn on another seat or add a bot.'); return; }
   N = active.length;
@@ -183,12 +184,14 @@ function startGame() {
   clearHand();
   document.getElementById('lobby').classList.add('hide');
   // cinematic open: the name assembles in blocky tiles like boxes filling in, then the board reveals
-  playIntro(() => {
+  const revealBoard = () => {
     buildBoard();
     renderPlayers();
-    aimCameraAt(players[0].side);   // show the first player's side once; it stays put after this
+    aimCameraAt(players[online ? friendSeat : 0].side);
     beginTurn();
-  });
+  };
+  if (online) revealBoard();
+  else playIntro(revealBoard);
 }
 
 const WALL_H = () => slat * 1.15, WALL_W = () => slat * 0.82;   // bar height / cross width (taller than wide, stands proud)
@@ -290,6 +293,10 @@ function resolveTurn(claimed) {
 function beginTurn(again) {
   clearHand();
   const p = players[cur];
+  if (friends.online && cur !== friendSeat) {
+    setMsg(`Waiting for ${p.name} to place a wall.`);
+    return;
+  }
   if (p.type === 'bot') {
     setMsg(`${p.avatar} ${p.name} (bot) is thinking...`);
     botTimer = setTimeout(botPlay, 700 + Math.random() * 500);
@@ -410,7 +417,7 @@ function dragMove(ev) {
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
-  if (!playing || !handWall || players[cur].type === 'bot') return;
+  if (!playing || !handWall || players[cur].type === 'bot' || (friends.online && !friends.connected)) return;
   ndcFrom(ev); raycaster.setFromCamera(ndc, camera);
   const onWall = raycaster.intersectObject(handWall, false).length > 0;
   const pt = pointerToBoard(ev);
@@ -421,7 +428,17 @@ addEventListener('pointermove', (ev) => { if (carrying) dragMove(ev); });
 addEventListener('pointerup', () => {
   if (!carrying) return;
   carrying = false; controls.enabled = true;
-  if (candidate) { const e = candidate; candidate = null; clearHand(); resolveTurn(commitEdge(e)); }
+  if (candidate) {
+    const e = candidate;
+    candidate = null;
+    if (friends.online) {
+      restHand();
+      friends.move(e);
+    } else {
+      clearHand();
+      resolveTurn(commitEdge(e));
+    }
+  }
   else restHand();   // dropped off the board -> wall returns to your tray
 });
 
@@ -604,6 +621,7 @@ function defaultSeats() {
 }
 function usedColor(idx, exceptSeat) { return seats.some((s, i) => i !== exceptSeat && s.active && s.colorIdx === idx); }
 function openLobby() {
+  if (friends.online) return friends.leave();
   if (botTimer) { clearTimeout(botTimer); botTimer = null; }
   playing = false; carrying = false; controls.enabled = true;
   if (!seats.length) seats = defaultSeats();
@@ -628,12 +646,12 @@ function renderLobby() {
       <p class="tag">Pick an avatar and colour for each seat. Drag your wall onto a line; close the 4th side of a box to claim it (it fills your colour) and go again. Most boxes wins.</p>
       ${seatHTML}
       <div class="row"><label>Board grid
-        <select onchange="boardSize=+this.value">
-          <option value="5">5 x 5</option><option value="7">7 x 7</option><option value="10" ${boardSize === 10 ? 'selected' : ''}>10 x 10</option>
+        <select onchange="setBoardSize(this.value)">
+          ${[5, 7, 10].map(size => `<option value="${size}" ${boardSize === size ? 'selected' : ''}>${size} x ${size}</option>`).join('')}
         </select></label></div>
       <button class="btn start" onclick="startGame()">Start game</button>
-      <button class="btn ghost start" disabled style="opacity:.55;cursor:not-allowed;">Online friends (coming soon)</button>
-      <p class="hint">Solo = you + bots. Local friends = set seats to Human. Online tables are coming soon.</p>
+      <button class="btn ghost start" onclick="inviteFriend()">Invite friends online</button>
+      <p class="hint">Play against bots, set seats to Human for same-screen play, or share an invite link.</p>
     </div>`;
 }
 function cycleAvatar(i) { seats[i].avatar = AVATARS[(AVATARS.indexOf(seats[i].avatar) + 1) % AVATARS.length]; renderLobby(); }
@@ -654,12 +672,32 @@ function setType(i, t) {
   renderLobby();
 }
 function nextFreeColor(i) { let idx = seats[i].colorIdx; for (let k = 0; k < 4; k++) { idx = (idx + 1) % 4; if (!usedColor(idx, i)) break; } return idx; }
-function inviteFriend() { alert('Online friend tables are the next step and will reuse FastTrack’s invite server. For now: local friends (set seats to Human) or play against bots.'); }
+let friendSeat = 0, friendMoves = 0, friendStarted = false;
+const friends = friendTable({
+  settings: () => ({ grid: boardSize, name: seats[0].name }),
+  status: setMsg,
+  update(state, you) {
+    if (!friendStarted) {
+      friendStarted = true;
+      friendSeat = state.players.findIndex(player => player.user_id === you);
+      boardSize = state.options.grid;
+      seats = state.players.map((player, i) => ({
+        active: true, type: 'human', avatar: AVATARS[i], colorIdx: i, name: player.username,
+      }));
+      startGame(true);
+    }
+    const pending = state.moves.slice(friendMoves);
+    for (const edge of pending) resolveTurn(commitEdge(edge));
+    if (!pending.length && playing) beginTurn();
+    friendMoves = state.moves.length;
+  },
+});
 
 window.openLobby = openLobby; window.startGame = startGame;
 function setName(i, v) { seats[i].name = v; }   // store only; no re-render, so the field keeps focus while typing
 function escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-window.cycleAvatar = cycleAvatar; window.cycleColor = cycleColor; window.toggleSeat = toggleSeat; window.setType = setType; window.setName = setName; window.inviteFriend = inviteFriend;
+window.cycleAvatar = cycleAvatar; window.cycleColor = cycleColor; window.toggleSeat = toggleSeat; window.setType = setType; window.setName = setName;
+window.inviteFriend = friends.invite; window.setBoardSize = value => { boardSize = Number(value); };
 window.showHelp = showHelp; window.toggleMute = toggleMute; window.closeWin = closeWin; window.playWinFanfare = playWinFanfare; window.finish = finish;
 window.resetView = () => { if (playing) aimCameraAt(players[cur].side); else { camera.position.set(0, 16, 16); controls.target.set(0, 0, 0); controls.update(); } };
 
@@ -673,7 +711,7 @@ function tick() {
   controls.update(); renderer.render(scene, camera);
 }
 camera.position.set(0, 16, 16); controls.target.set(0, 0, 0); controls.update();
-resize(); openLobby(); tick();
+resize(); openLobby(); tick(); friends.join();
 </script>
 </body>
 </html>
